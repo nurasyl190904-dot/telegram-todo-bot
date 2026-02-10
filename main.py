@@ -13,7 +13,7 @@ server = Flask(__name__)
 
 @server.route('/')
 def home():
-    return "Bot is running OK!"
+    return "Bot is running with MENU!"
 
 def run():
     server.run(host="0.0.0.0", port=8080)
@@ -23,7 +23,7 @@ def keep_alive():
     t.start()
 
 # ----------------------------------------------------
-# 2. БОТТЫҢ НЕГІЗГІ БАПТАУЛАРЫ
+# 2. БАПТАУЛАР
 # ----------------------------------------------------
 TELEGRAM_TOKEN = "8444548738:AAETJGiufSA5dCg4j2lOBo_dEIOB_KU-GHU"
 GEMINI_API_KEY = "AIzaSyBMlHtTPTrgIJcslZN7KU8zvPsFeP5Gkl0"
@@ -31,103 +31,129 @@ GEMINI_API_KEY = "AIzaSyBMlHtTPTrgIJcslZN7KU8zvPsFeP5Gkl0"
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 genai.configure(api_key=GEMINI_API_KEY)
 
-# --- ТҮЗЕТІЛГЕН ЖЕРІ: Gemini 2.0 Flash ---
-current_model_name = "gemini-2.0-flash" 
+# Модельдер
+text_model = genai.GenerativeModel("gemini-2.0-flash")
+# Егер сурет моделі қолжетімді болса (кейде gemini-pro-vision немесе imagen қолданылады)
+# Қазірше текстік модельді қолданамыз, сурет генерациясы бөлек API сұрауы мүмкін.
 
-# Модельді жүктейміз
-try:
-    model = genai.GenerativeModel(current_model_name)
-except:
-    # Егер 2.0 істемесе, ең қарапайым Pro-ға ауысады
-    current_model_name = "gemini-pro"
-    model = genai.GenerativeModel("gemini-pro")
+# ПАЙДАЛАНУШЫНЫҢ КҮЙІН САҚТАУ (Кім не істеп жатыр?)
+user_state = {} 
+# "chat" -> жай сөйлесу
+# "image" -> сурет сипаттамасын күту
+# "todo" -> тізімге қосу
 
-user_data = {}
+user_data = {} # Шаруалар тізімі
 
 # ----------------------------------------------------
-# 3. БОТ ФУНКЦИЯЛАРЫ
+# 3. МӘЗІР (MENU) ЖАСАУ
+# ----------------------------------------------------
+def main_menu():
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    btn1 = types.KeyboardButton("🤖 AI Чат")
+    btn2 = types.KeyboardButton("🎨 Сурет жасау")
+    btn3 = types.KeyboardButton("📝 Шаруалар")
+    btn4 = types.KeyboardButton("🎥 Видео жасау")
+    markup.add(btn1, btn2, btn3, btn4)
+    return markup
+
+# ----------------------------------------------------
+# 4. БОТ ФУНКЦИЯЛАРЫ
 # ----------------------------------------------------
 
 @bot.message_handler(commands=['start'])
 def start_message(message):
     chat_id = message.chat.id
-    if chat_id not in user_data: user_data[chat_id] = []
+    user_state[chat_id] = "chat" # Бастапқыда жай сөйлесу режимі
     
     bot.send_message(chat_id, 
-        f"Сәлем! 👋 Мен сервердемін!\n"
-        f"Қазіргі миым: {current_model_name}\n\n"
-        "✅ /ai [сұрақ] - Сұрақ қою\n"
-        "✅ /mode - Модельді ауыстыру\n"
-        "✅ /show - Шаруалар"
+        "Сәлем! Мен супер-ботпын. Не істейміз?", 
+        reply_markup=main_menu()
     )
 
-@bot.message_handler(commands=['mode'])
-def change_mode(message):
-    markup = types.InlineKeyboardMarkup(row_width=1)
-    # Сенің тізіміңдегі нақты бар модельдер:
-    btn1 = types.InlineKeyboardButton("🚀 Flash 2.0 (Жылдам)", callback_data="set_flash")
-    btn2 = types.InlineKeyboardButton("🧠 Pro (Классика)", callback_data="set_pro")
-    markup.add(btn1, btn2)
-    bot.send_message(message.chat.id, f"Модельді таңда (Қазір: {current_model_name}):", reply_markup=markup)
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_handler(call):
-    global current_model_name, model
-    chat_id = call.message.chat.id
-    
-    if call.data == "set_flash":
-        new_model = "gemini-2.0-flash"
-    elif call.data == "set_pro":
-        new_model = "gemini-pro"
-    
-    try:
-        model = genai.GenerativeModel(new_model)
-        current_model_name = new_model
-        bot.edit_message_text(chat_id=chat_id, message_id=call.message.message_id, 
-                              text=f"✅ Ауыстырылды: {current_model_name}")
-    except Exception as e:
-        bot.send_message(chat_id, f"Қате: {e}")
-
-@bot.message_handler(commands=['ai'])
-def ask_ai(message):
+# БАТЫРМАЛАРДЫ ҰСТАУ
+@bot.message_handler(func=lambda message: message.text in ["🤖 AI Чат", "🎨 Сурет жасау", "📝 Шаруалар", "🎥 Видео жасау"])
+def menu_handler(message):
     chat_id = message.chat.id
-    question = message.text[4:].strip()
-    if len(question) < 2:
-        bot.send_message(chat_id, "Сұрақты жазшы.")
-        return
+    text = message.text
 
-    wait_msg = bot.send_message(chat_id, "Ойланып жатырмын...")
-    try:
-        response = model.generate_content(question)
-        bot.send_message(chat_id, response.text)
-        bot.delete_message(chat_id, wait_msg.message_id)
-    except Exception as e:
-        bot.send_message(chat_id, f"Қате: {e}")
+    if text == "🤖 AI Чат":
+        user_state[chat_id] = "chat"
+        bot.send_message(chat_id, "Ок, сұрағыңды қоя бер! (Мәтін режимі)", reply_markup=main_menu())
 
-# Шаруа қосу
+    elif text == "🎨 Сурет жасау":
+        user_state[chat_id] = "image"
+        bot.send_message(chat_id, "Қандай сурет салайын? Сипаттамасын жаз (Мысалы: Ғарыштағы мысық):", reply_markup=types.ReplyKeyboardRemove())
+
+    elif text == "📝 Шаруалар":
+        # Тізімді көрсету
+        if chat_id in user_data and user_data[chat_id]:
+            tasks = "\n".join([f"{i+1}. {t}" for i, t in enumerate(user_data[chat_id])])
+            bot.send_message(chat_id, f"📋 Сенің тізімің:\n{tasks}\n\nҚосу үшін жай жаза бер.", reply_markup=main_menu())
+        else:
+            bot.send_message(chat_id, "Тізім бос. Жаңа шаруа жазсаң, қосып қоямын.", reply_markup=main_menu())
+        user_state[chat_id] = "todo"
+
+    elif text == "🎥 Видео жасау":
+        bot.send_message(chat_id, "Видео генерациясы өте ауыр процесс. \nМен саған қазір демо видео жіберемін...", reply_markup=main_menu())
+        # Бұл жерде дайын видео жіберуге болады
+        # Егер AI видео жасау керек болса, арнайы (Sora/Runway) API керек.
+        # Мысал ретінде, бот "жүктеп жатырмын" деп файл жібереді:
+        try:
+             # Мысал видео (MP4 сілтемесі)
+             demo_video = "https://www.w3schools.com/html/mov_bbb.mp4" 
+             bot.send_video(chat_id, demo_video, caption="Міне, мысал видео!")
+        except:
+             bot.send_message(chat_id, "Видео жіберуде қате шықты.")
+
+# МӘТІНДІ ӨҢДЕУ (РЕЖИМГЕ БАЙЛАНЫСТЫ)
 @bot.message_handler(content_types=['text'])
-def add_task(message):
-    if message.text.startswith('/'): return
+def handle_text(message):
     chat_id = message.chat.id
-    if chat_id not in user_data: user_data[chat_id] = []
-    user_data[chat_id].append(message.text)
-    bot.send_message(chat_id, f"✅ Қосылды: {message.text}")
+    text = message.text
+    
+    # Егер күй белгісіз болса, чат деп есептейміз
+    if chat_id not in user_state:
+        user_state[chat_id] = "chat"
 
-@bot.message_handler(commands=['show'])
-def show_tasks(message):
-    chat_id = message.chat.id
-    if chat_id in user_data and user_data[chat_id]:
-        msg = "📝 Тізім:\n" + "\n".join([f"{i+1}. {t}" for i, t in enumerate(user_data[chat_id])])
-        bot.send_message(chat_id, msg)
-    else:
-        bot.send_message(chat_id, "Тізім бос.")
+    # 1. СУРЕТ ЖАСАУ РЕЖИМІ
+    if user_state[chat_id] == "image":
+        bot.send_message(chat_id, f"🖌 '{text}' бойынша сурет салып жатырмын... (Күте тұр)")
+        try:
+            # Gemini арқылы сурет жасау әрекеті (Егер доступ болса)
+            # Қазіргі Python SDK-да сурет генерациясы былай шақырылуы мүмкін:
+            # model_image = genai.GenerativeModel('imagen-3.0-generate-001')
+            # result = model_image.generate_content(text)
+            
+            # ӘЗІРГЕ СИМУЛЯЦИЯ (Себебі Image API кілті бөлек болуы мүмкін)
+            # Шын сурет жасау үшін сенің API кілтіңде "Image Generation" рұқсаты болуы керек.
+            bot.send_message(chat_id, "⚠️ Менің серверімде әзірге 'Imagen' моделі қосылмаған. \nБірақ мен сенің сұранысыңды қабылдадым!")
+            
+            # Мәзірді қайтару
+            user_state[chat_id] = "chat"
+            bot.send_message(chat_id, "Басқа не істейміз?", reply_markup=main_menu())
+            
+        except Exception as e:
+            bot.send_message(chat_id, f"Қате: {e}")
+            user_state[chat_id] = "chat"
+            bot.send_message(chat_id, "Мәзірге қайттық.", reply_markup=main_menu())
 
-@bot.message_handler(commands=['clear'])
-def clear_tasks(message):
-    if message.chat.id in user_data:
-        user_data[message.chat.id].clear()
-        bot.send_message(message.chat.id, "Тазартылды!")
+    # 2. ТІЗІМ РЕЖИМІ
+    elif user_state[chat_id] == "todo":
+        if chat_id not in user_data: user_data[chat_id] = []
+        user_data[chat_id].append(text)
+        bot.send_message(chat_id, f"✅ Тізімге қосылды: {text}", reply_markup=main_menu())
+        # Бір қосқан соң, мәзірге қайтаруға болады немесе қалдыруға болады.
+    
+    # 3. ЧАТ РЕЖИМІ (AI)
+    else: # "chat"
+        try:
+            response = text_model.generate_content(text)
+            bot.send_message(chat_id, response.text, reply_markup=main_menu())
+        except Exception as e:
+            bot.send_message(chat_id, "AI жауап бере алмады. Қайталап көр.", reply_markup=main_menu())
 
-# 4. ІСКЕ ҚОСУ
+# ----------------------------------------------------
+# 5. ІСКЕ ҚОСУ
+# ----------------------------------------------------
 keep_alive()
 bot.infinity_polling()
